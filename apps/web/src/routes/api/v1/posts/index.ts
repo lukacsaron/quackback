@@ -56,12 +56,17 @@ export const Route = createFileRoute('/api/v1/posts/')({
           const dateToParam = url.searchParams.get('dateTo') ?? undefined
           const sort = (url.searchParams.get('sort') as 'newest' | 'oldest' | 'votes') ?? 'newest'
           const showDeleted = url.searchParams.get('showDeleted') === 'true'
+          const authorPrincipalIdParam = url.searchParams.get('authorPrincipalId') ?? undefined
+          const authorEmail = url.searchParams.get('authorEmail')?.trim() || undefined
 
           const { isValidTypeId } = await import('@quackback/ids')
           const boardId =
             boardIdParam && isValidTypeId(boardIdParam, 'board')
               ? (boardIdParam as BoardId)
               : undefined
+          const authorId = authorPrincipalIdParam
+            ? parseTypeId<PrincipalId>(authorPrincipalIdParam, 'principal', 'authorPrincipalId')
+            : undefined
 
           const { listInboxPosts } = await import('@/lib/server/domains/posts/post.inbox')
 
@@ -87,6 +92,8 @@ export const Route = createFileRoute('/api/v1/posts/')({
             dateTo: dateTo && !isNaN(dateTo.getTime()) ? dateTo : undefined,
             sort,
             showDeleted: showDeleted || undefined,
+            authorId,
+            authorEmail,
             limit,
             cursor,
           })
