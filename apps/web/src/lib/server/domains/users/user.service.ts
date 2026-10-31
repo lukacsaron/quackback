@@ -25,6 +25,9 @@ import {
   principal,
   user,
   session,
+  account,
+  twoFactor,
+  widgetIdentifiedSession,
   conversations,
   posts,
   postComments,
@@ -497,5 +500,108 @@ export async function removePortalUser(principalId: PrincipalId): Promise<void> 
     if (error instanceof NotFoundError) throw error
     log.error({ err: error, principalId }, 'failed to remove portal user')
     throw new InternalError('DATABASE_ERROR', 'Failed to remove portal user', error)
+  }
+}
+
+/** Display name written over an anonymised person's user and principal rows. */
+export const ANONYMIZED_USER_NAME = 'Deleted user'
+
+/**
+ * Anonymise a portal user in place (GDPR erasure that keeps the record).
+ *
+ * Unlike removePortalUser, the principal stays, so posts, comments and votes
+ * keep their author and vote counts stay exact. What identifies the person is
+ * cleared in one transaction:
+ *
+ * - user: name becomes "Deleted user"; email, image, imageKey, metadata
+ *   (attributes and `_externalUserId`), country, locale, preferredLanguage and
+ *   externalId become NULL, so a later ssoToken with the same `sub` or email
+ *   cannot resolve this row.
+ * - principal: displayName becomes "Deleted user"; avatarUrl, avatarKey and
+ *   contactEmail become NULL. Conversation `visitorEmail` is cleared as in
+ *   removePortalUser.
+ * - every sign-in route is closed: sessions (portal and widget), their
+ *   widget_identified_session rows, OAuth/password `account` rows and
+ *   two_factor rows are deleted.
+ */
+export async function anonymizePortalUser(principalId: PrincipalId): Promise<void> {
+  try {
+    const existingPrincipal = await db.query.principal.findFirst({
+      where: and(
+        eq(principal.id, principalId),
+        eq(principal.role, 'user'),
+        ne(principal.id, DELETED_USER_PRINCIPAL_ID)
+      ),
+    })
+
+    if (!existingPrincipal) {
+      throw new NotFoundError(
+        'MEMBER_NOT_FOUND',
+        `Portal user with principal ID ${principalId} not found`
+      )
+    }
+
+    const userId = existingPrincipal.userId
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(principal)
+        .set({
+          displayName: ANONYMIZED_USER_NAME,
+          avatarUrl: null,
+          avatarKey: null,
+          contactEmail: null,
+        })
+        .where(eq(principal.id, principalId))
+      await tx
+        .update(conversations)
+        .set({ visitorEmail: null })
+        .where(eq(conversations.visitorPrincipalId, principalId))
+      if (userId) {
+        await tx
+          .delete(widgetIdentifiedSession)
+          .where(
+            inArray(
+              widgetIdentifiedSession.sessionId,
+              tx.select({ id: session.id }).from(session).where(eq(session.userId, userId))
+            )
+          )
+        await tx.delete(session).where(eq(session.userId, userId))
+        await tx.delete(account).where(eq(account.userId, userId))
+        await tx.delete(twoFactor).where(eq(twoFactor.userId, userId))
+        await tx
+          .update(user)
+          .set({
+            name: ANONYMIZED_USER_NAME,
+            email: null,
+            image: null,
+            imageKey: null,
+            metadata: null,
+            country: null,
+            locale: null,
+            preferredLanguage: null,
+            externalId: null,
+            twoFactorEnabled: false,
+            updatedAt: new Date(),
+          })
+          .where(eq(user.id, userId))
+      }
+    })
+
+    if (userId) {
+      try {
+        const { cacheDel, CACHE_KEYS } = await import('@/lib/server/cache')
+        await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(userId))
+      } catch (error) {
+        log.warn(
+          { err: error, user_id: userId },
+          'failed to invalidate principal cache after anonymize'
+        )
+      }
+    }
+  } catch (error) {
+    if (error instanceof NotFoundError) throw error
+    log.error({ err: error, principalId }, 'failed to anonymize portal user')
+    throw new InternalError('DATABASE_ERROR', 'Failed to anonymize portal user', error)
   }
 }
