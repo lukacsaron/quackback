@@ -216,6 +216,48 @@ describe('POST /api/v1/tickets customAttributes', () => {
     expect(res.status).toBe(400)
     expect(mockCreateTicket).not.toHaveBeenCalled()
   })
+
+  // L19: values are shown as text in the inbox, so only flat values are taken
+  // (a nested object would render "[object Object]"), and size is bounded.
+  it('accepts the TTMT bug context shape (strings, null, a list of strings)', async () => {
+    const context = {
+      account_ref: null,
+      account_name: 'Main',
+      broker_server: 'ICMarkets-Live',
+      provider: 'metaapi',
+      recent_trade_refs: ['trd_a', 'trd_b'],
+    }
+    mockCreateTicket.mockResolvedValue({ ...ticketDTO, customAttributes: context })
+    const res = await post(ListRoute)({
+      request: jsonReq('https://x.test/api/v1/tickets', {
+        type: 'customer',
+        title: 'Bug',
+        customAttributes: context,
+      }),
+      params: {},
+    })
+    expect(res.status).toBe(201)
+  })
+
+  it.each([
+    ['a nested object value', { nested: { a: 1 } }],
+    ['a list holding an object', { refs: [{ a: 1 }] }],
+    ['an over-long string value', { note: 'x'.repeat(2001) }],
+    ['an over-long key', { ['k'.repeat(65)]: 'v' }],
+    ['too many keys', Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`k${i}`, i]))],
+    ['too long a list', { refs: Array.from({ length: 51 }, (_, i) => `trd_${i}`) }],
+  ])('400s customAttributes with %s', async (_label, customAttributes) => {
+    const res = await post(ListRoute)({
+      request: jsonReq('https://x.test/api/v1/tickets', {
+        type: 'customer',
+        title: 'x',
+        customAttributes,
+      }),
+      params: {},
+    })
+    expect(res.status).toBe(400)
+    expect(mockCreateTicket).not.toHaveBeenCalled()
+  })
 })
 
 describe('POST /api/v1/tickets/:id/reply', () => {

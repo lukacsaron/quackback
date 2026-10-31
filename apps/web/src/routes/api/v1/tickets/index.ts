@@ -23,6 +23,19 @@ import type { TicketType, TicketStatusCategory, TicketStage } from '@/lib/server
 import type { TicketSort } from '@/lib/server/domains/tickets/ticket.types'
 import type { PrincipalId, CompanyId, SegmentId, TicketTypeId } from '@quackback/ids'
 
+// Context values are shown as text, so only flat values (or a list of them)
+// are accepted, and the size is bounded.
+const customAttributeScalar = z.union([z.string().max(2000), z.number(), z.boolean(), z.null()])
+const customAttributesSchema = z
+  .record(
+    z.string().min(1).max(64),
+    z.union([
+      customAttributeScalar,
+      z.array(z.union([z.string().max(200), z.number(), z.boolean()])).max(50),
+    ])
+  )
+  .refine((attrs) => Object.keys(attrs).length <= 50, { message: 'At most 50 attributes' })
+
 const createTicketSchema = z.object({
   // Optional since Phase 4: derivable from ticketTypeId (a mismatched explicit
   // category is rejected by the service); 'customer' stands when neither is given.
@@ -35,8 +48,8 @@ const createTicketSchema = z.object({
   requesterPrincipalId: z.string().optional(),
   companyId: z.string().optional(),
   attachments: attachmentsSchema,
-  // Free-form context stored on the ticket (`tickets.custom_attributes`).
-  customAttributes: z.record(z.string(), z.unknown()).optional(),
+  // Context stored on the ticket (`tickets.custom_attributes`).
+  customAttributes: customAttributesSchema.optional(),
 })
 
 export const Route = createFileRoute('/api/v1/tickets/')({
