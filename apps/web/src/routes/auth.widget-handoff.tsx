@@ -45,6 +45,7 @@ import { setResponseHeader } from '@tanstack/react-start/server'
 import { z } from 'zod'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { buildSigninRedirect } from '@/lib/shared/auth-prompt'
+import { teammateHandoffLanding } from '@/lib/shared/external-signin'
 import type { UserId } from '@quackback/ids'
 
 /** Skip the portal cookie for teammates so a dashboard login is not replaced. */
@@ -292,11 +293,20 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
       if (existingIsDashboard) {
         return { kind: 'redirect', to: returnTo }
       }
-      // The error keeps the landing on Quackback's own dialog: with delegated
-      // portal sign-in (portalConfig.externalSignInUrl) a plain landing would
-      // send the teammate back out to the external app, which would hand them
-      // straight back here.
-      const landing = buildSigninRedirect(returnTo, { error: 'teammate_widget_handoff' })
+      // With delegated portal sign-in (portalConfig.externalSignInUrl) a plain
+      // landing would send the teammate back out to the external app, which
+      // would hand them straight back here; the helper adds the error that
+      // keeps them on Quackback's own dialog, and only in that case.
+      // An unreadable config keeps the error: a needless message beats a loop.
+      let landing = buildSigninRedirect(returnTo, { error: 'teammate_widget_handoff' })
+      try {
+        const { getPublicPortalConfig } =
+          await import('@/lib/server/domains/settings/settings.service')
+        const { externalSignInUrl } = await getPublicPortalConfig()
+        landing = teammateHandoffLanding(returnTo, externalSignInUrl)
+      } catch (err) {
+        log.warn({ err }, 'portal config unreadable; teammate landing keeps the error')
+      }
       return { kind: 'redirect', to: landing.to, search: landing.search }
     }
 

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isAllowedExternalSignInUrl } from '@/lib/shared/external-signin'
 import { createServerFn } from '@tanstack/react-start'
 import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
 // Import types from barrel export (client-safe)
@@ -374,13 +375,13 @@ export const updatePortalConfigSchema = z.object({
         .optional(),
     })
     .optional(),
-  // Delegated portal sign-in (see PortalConfig.externalSignInUrl). http(s)
-  // only; null clears it.
+  // Delegated portal sign-in (see PortalConfig.externalSignInUrl). https, or
+  // http to this machine only; null clears it.
   externalSignInUrl: z
     .string()
     .url()
     .max(2048)
-    .refine((u) => /^https?:\/\//i.test(u), 'URL must be http(s)')
+    .refine(isAllowedExternalSignInUrl, 'URL must be https')
     .nullable()
     .optional(),
 })

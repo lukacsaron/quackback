@@ -203,8 +203,9 @@ async function runHandoffLoader(search: string) {
     if (existingIsDashboard) {
       return { status: 'redirect' as const, to: returnTo }
     }
-    const { buildSigninRedirect } = await import('@/lib/shared/auth-prompt')
-    const landing = buildSigninRedirect(returnTo, { error: 'teammate_widget_handoff' })
+    // Mirrors the route with delegated portal sign-in configured.
+    const { teammateHandoffLanding } = await import('@/lib/shared/external-signin')
+    const landing = teammateHandoffLanding(returnTo, 'https://app.example.com/api/feedback/sso')
     return { status: 'redirect' as const, to: landing.to, search: landing.search }
   }
 
