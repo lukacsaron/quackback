@@ -71,6 +71,7 @@ export const Route = createFileRoute('/api/v1/posts/$postId')({
             statusId: post.statusId,
             authorName: post.authorName ?? null,
             authorEmail: realEmail(post.authorEmail),
+            authorPrincipalId: post.principalId ?? null,
             ownerPrincipalId: post.ownerPrincipalId,
             tags: post.tags?.map((t) => ({ id: t.id, name: t.name, color: t.color })) ?? [],
             pinnedComment: post.pinnedComment
