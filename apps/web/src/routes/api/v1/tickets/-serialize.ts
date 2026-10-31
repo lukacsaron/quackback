@@ -27,6 +27,7 @@ export function serializeTicket(dto: TicketDTO) {
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
     reopenedCount: dto.reopenedCount,
+    customAttributes: dto.customAttributes,
   }
 }
 

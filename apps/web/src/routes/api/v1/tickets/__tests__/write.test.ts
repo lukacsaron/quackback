@@ -178,6 +178,46 @@ describe('POST /api/v1/tickets (create)', () => {
   })
 })
 
+describe('POST /api/v1/tickets customAttributes', () => {
+  it('passes customAttributes to createTicket and returns them on the ticket', async () => {
+    const context = { account_id: 'acc_1', trade_refs: ['trd_a', 'trd_b'] }
+    mockCreateTicket.mockResolvedValue({ ...ticketDTO, customAttributes: context })
+    const res = await post(ListRoute)({
+      request: jsonReq('https://x.test/api/v1/tickets', {
+        type: 'customer',
+        title: 'Bug',
+        customAttributes: context,
+      }),
+      params: {},
+    })
+    expect(res.status).toBe(201)
+    expect(mockCreateTicket.mock.calls[0][0].customAttributes).toEqual(context)
+    expect((await res.json()).data.customAttributes).toEqual(context)
+  })
+
+  it('leaves customAttributes unset when omitted', async () => {
+    mockCreateTicket.mockResolvedValue(ticketDTO)
+    await post(ListRoute)({
+      request: jsonReq('https://x.test/api/v1/tickets', { type: 'customer', title: 'Hi' }),
+      params: {},
+    })
+    expect(mockCreateTicket.mock.calls[0][0].customAttributes).toBeUndefined()
+  })
+
+  it('400s customAttributes that is not an object', async () => {
+    const res = await post(ListRoute)({
+      request: jsonReq('https://x.test/api/v1/tickets', {
+        type: 'customer',
+        title: 'x',
+        customAttributes: 'account 1',
+      }),
+      params: {},
+    })
+    expect(res.status).toBe(400)
+    expect(mockCreateTicket).not.toHaveBeenCalled()
+  })
+})
+
 describe('POST /api/v1/tickets/:id/reply', () => {
   it('sends a customer-visible reply gated ticket.reply', async () => {
     mockSendMessage.mockResolvedValue({ message: messageDTO })

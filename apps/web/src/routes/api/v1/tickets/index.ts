@@ -35,6 +35,8 @@ const createTicketSchema = z.object({
   requesterPrincipalId: z.string().optional(),
   companyId: z.string().optional(),
   attachments: attachmentsSchema,
+  // Free-form context stored on the ticket (`tickets.custom_attributes`).
+  customAttributes: z.record(z.string(), z.unknown()).optional(),
 })
 
 export const Route = createFileRoute('/api/v1/tickets/')({
@@ -138,6 +140,7 @@ export const Route = createFileRoute('/api/v1/tickets/')({
               requesterPrincipalId,
               companyId,
               attachments: toAttachments(parsed.data.attachments),
+              customAttributes: parsed.data.customAttributes,
               // CONVERGENCE PHASE 1b: a customer-intake path — a CUSTOMER ticket
               // created WITH a requester gets its backing conversation + link in
               // the same transaction (createTicketCore's doc carries the
