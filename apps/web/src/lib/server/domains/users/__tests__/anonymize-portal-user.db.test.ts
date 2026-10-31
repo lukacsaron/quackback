@@ -9,6 +9,8 @@ import { createDbTestFixture, testDb } from '@/lib/server/__tests__/db-test-fixt
 import {
   account,
   boards,
+  channelIdentities,
+  emailLog,
   eq,
   posts,
   postVotes,
@@ -39,6 +41,8 @@ const fixture = await createDbTestFixture({
       .from(widgetIdentifiedSession)
       .limit(0)
     await db.select({ id: postVotes.id }).from(postVotes).limit(0)
+    await db.select({ p: channelIdentities.principalId }).from(channelIdentities).limit(0)
+    await db.select({ a: emailLog.address }).from(emailLog).limit(0)
   },
 })
 
@@ -82,6 +86,17 @@ describe.skipIf(!fixture.available)('anonymizePortalUser (real DB, rolled back)'
       updatedAt: new Date(),
     })
 
+    await testDb
+      .insert(channelIdentities)
+      .values({ channel: 'email', externalId: email, principalId, verified: false })
+    await testDb.insert(emailLog).values({
+      direction: 'outbound',
+      emailType: 'ticket_reply',
+      principalId,
+      address: email,
+      status: 'sent',
+    })
+
     const boardId = createId('board') as BoardId
     await testDb
       .insert(boards)
@@ -113,6 +128,16 @@ describe.skipIf(!fixture.available)('anonymizePortalUser (real DB, rolled back)'
         .from(widgetIdentifiedSession)
         .where(eq(widgetIdentifiedSession.sessionId, sessionId))
     ).toHaveLength(0)
+
+    expect(
+      await testDb
+        .select()
+        .from(channelIdentities)
+        .where(eq(channelIdentities.principalId, principalId))
+    ).toHaveLength(0)
+    const logs = await testDb.select().from(emailLog).where(eq(emailLog.principalId, principalId))
+    expect(logs).toHaveLength(1)
+    expect(logs[0].address).not.toContain(email)
 
     const [post] = await testDb.select().from(posts).where(eq(posts.id, postId))
     expect(post.principalId).toBe(principalId)

@@ -28,6 +28,11 @@ import {
   account,
   twoFactor,
   widgetIdentifiedSession,
+  widgetOriginSession,
+  oneTimeToken,
+  channelIdentities,
+  emailLog,
+  tickets,
   conversations,
   posts,
   postComments,
@@ -506,6 +511,9 @@ export async function removePortalUser(principalId: PrincipalId): Promise<void> 
 /** Display name written over an anonymised person's user and principal rows. */
 export const ANONYMIZED_USER_NAME = 'Deleted user'
 
+/** Written over `email_log.address` (NOT NULL) for an anonymised person. */
+export const ANONYMIZED_EMAIL_ADDRESS = 'redacted'
+
 /**
  * Anonymise a portal user in place (GDPR erasure that keeps the record).
  *
@@ -517,12 +525,18 @@ export const ANONYMIZED_USER_NAME = 'Deleted user'
  *   (attributes and `_externalUserId`), country, locale, preferredLanguage and
  *   externalId become NULL, so a later ssoToken with the same `sub` or email
  *   cannot resolve this row.
- * - principal: displayName becomes "Deleted user"; avatarUrl, avatarKey and
- *   contactEmail become NULL. Conversation `visitorEmail` is cleared as in
- *   removePortalUser.
+ * - principal: displayName becomes "Deleted user"; avatarUrl, avatarKey,
+ *   contactEmail and companyId become NULL. Conversation `visitorEmail` is
+ *   cleared as in removePortalUser.
+ * - email traces: the principal's `channel_identities` rows are deleted (so
+ *   mail from the old address no longer resolves to this principal) and
+ *   `email_log.address` is overwritten with "redacted".
+ * - tickets the person requested keep their content but lose
+ *   `customAttributes` (host-app context attached at creation).
  * - every sign-in route is closed: sessions (portal and widget), their
- *   widget_identified_session rows, OAuth/password `account` rows and
- *   two_factor rows are deleted.
+ *   widget_identified_session rows, widget_origin_session markers, unused
+ *   one_time_token rows, OAuth/password `account` rows and two_factor rows
+ *   are deleted.
  */
 export async function anonymizePortalUser(principalId: PrincipalId): Promise<void> {
   try {
@@ -551,12 +565,22 @@ export async function anonymizePortalUser(principalId: PrincipalId): Promise<voi
           avatarUrl: null,
           avatarKey: null,
           contactEmail: null,
+          companyId: null,
         })
         .where(eq(principal.id, principalId))
       await tx
         .update(conversations)
         .set({ visitorEmail: null })
         .where(eq(conversations.visitorPrincipalId, principalId))
+      await tx.delete(channelIdentities).where(eq(channelIdentities.principalId, principalId))
+      await tx
+        .update(emailLog)
+        .set({ address: ANONYMIZED_EMAIL_ADDRESS })
+        .where(eq(emailLog.principalId, principalId))
+      await tx
+        .update(tickets)
+        .set({ customAttributes: {} })
+        .where(eq(tickets.requesterPrincipalId, principalId))
       if (userId) {
         await tx
           .delete(widgetIdentifiedSession)
@@ -567,6 +591,8 @@ export async function anonymizePortalUser(principalId: PrincipalId): Promise<voi
             )
           )
         await tx.delete(session).where(eq(session.userId, userId))
+        await tx.delete(widgetOriginSession).where(eq(widgetOriginSession.userId, userId))
+        await tx.delete(oneTimeToken).where(eq(oneTimeToken.userId, userId))
         await tx.delete(account).where(eq(account.userId, userId))
         await tx.delete(twoFactor).where(eq(twoFactor.userId, userId))
         await tx

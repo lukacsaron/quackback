@@ -44,7 +44,12 @@ vi.mock('@/lib/server/cache', () => ({
 
 import {
   account,
+  channelIdentities,
   conversations,
+  emailLog,
+  oneTimeToken,
+  tickets,
+  widgetOriginSession,
   postComments,
   posts,
   postVotes,
@@ -54,7 +59,7 @@ import {
   user,
   widgetIdentifiedSession,
 } from '@/lib/server/db'
-import { anonymizePortalUser } from '../user.service'
+import { anonymizePortalUser, ANONYMIZED_EMAIL_ADDRESS } from '../user.service'
 import { NotFoundError } from '@/lib/shared/errors'
 
 const PRINCIPAL = 'principal_01kqhxq697fvgat0fvps13rmy2' as unknown as PrincipalId
@@ -102,6 +107,31 @@ describe('anonymizePortalUser', () => {
     for (const table of [posts, postComments, postVotes]) {
       expect(touched).not.toContain(table)
     }
+  })
+
+  it('I6: deletes the email channel identities and redacts the email log address', async () => {
+    mockFindFirst.mockResolvedValue({ id: PRINCIPAL, userId: USER, role: 'user' })
+
+    await anonymizePortalUser(PRINCIPAL)
+
+    expect(writes.find((w) => w.op === 'delete' && w.table === channelIdentities)).toBeTruthy()
+    expect(writes.find((w) => w.op === 'update' && w.table === emailLog)?.set).toEqual({
+      address: ANONYMIZED_EMAIL_ADDRESS,
+    })
+  })
+
+  it('L18: drops the company link, widget origin markers, one-time tokens and ticket context', async () => {
+    mockFindFirst.mockResolvedValue({ id: PRINCIPAL, userId: USER, role: 'user' })
+
+    await anonymizePortalUser(PRINCIPAL)
+
+    const principalWrite = writes.find((w) => w.op === 'update' && w.table === principal)
+    expect(principalWrite?.set).toMatchObject({ companyId: null })
+    const deleted = writes.filter((w) => w.op === 'delete').map((w) => w.table)
+    expect(deleted).toEqual(expect.arrayContaining([widgetOriginSession, oneTimeToken]))
+    expect(writes.find((w) => w.op === 'update' && w.table === tickets)?.set).toEqual({
+      customAttributes: {},
+    })
   })
 
   it('throws NotFoundError and writes nothing for an unknown or non-portal principal', async () => {
