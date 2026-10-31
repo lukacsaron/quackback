@@ -30,6 +30,9 @@ import {
   posts,
   principal,
   user,
+  boards,
+  postStatuses,
+  desc,
   type Transaction,
 } from '@/lib/server/db'
 import { toUuid, type PrincipalId, type PostId } from '@quackback/ids'
@@ -288,6 +291,58 @@ export async function getMemberSubscriptions(principalId: PrincipalId): Promise<
     notifyStatusChanges: row.notifyStatusChanges,
     createdAt: row.createdAt,
   }))
+}
+
+/**
+ * A post a member is subscribed to, with the post fields a "followed posts"
+ * list needs. `subscribedAt` is when the subscription row was created.
+ */
+export interface MemberSubscribedPost {
+  id: PostId
+  title: string
+  statusId: string | null
+  statusName: string | null
+  boardId: string
+  boardSlug: string
+  boardName: string
+  voteCount: number
+  createdAt: Date
+  subscribedAt: Date
+  reason: SubscriptionReason
+  notifyComments: boolean
+  notifyStatusChanges: boolean
+}
+
+/**
+ * Get every non-deleted post a member is subscribed to, newest subscription first.
+ */
+export async function getMemberSubscribedPosts(
+  principalId: PrincipalId
+): Promise<MemberSubscribedPost[]> {
+  const rows = await db
+    .select({
+      id: posts.id,
+      title: posts.title,
+      statusId: posts.statusId,
+      statusName: postStatuses.name,
+      boardId: boards.id,
+      boardSlug: boards.slug,
+      boardName: boards.name,
+      voteCount: posts.voteCount,
+      createdAt: posts.createdAt,
+      subscribedAt: postSubscriptions.createdAt,
+      reason: postSubscriptions.reason,
+      notifyComments: postSubscriptions.notifyComments,
+      notifyStatusChanges: postSubscriptions.notifyStatusChanges,
+    })
+    .from(postSubscriptions)
+    .innerJoin(posts, and(eq(postSubscriptions.postId, posts.id), isNull(posts.deletedAt)))
+    .innerJoin(boards, eq(posts.boardId, boards.id))
+    .leftJoin(postStatuses, eq(postStatuses.id, posts.statusId))
+    .where(eq(postSubscriptions.principalId, principalId))
+    .orderBy(desc(postSubscriptions.createdAt))
+
+  return rows.map((row) => ({ ...row, reason: row.reason as SubscriptionReason }))
 }
 
 /**
