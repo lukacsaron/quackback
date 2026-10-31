@@ -1,0 +1,187 @@
+/**
+ * I4 (TTMT fork, review round 1): an email match whose email was never verified
+ * may have been registered by someone else before the real owner arrived.
+ * Before linking it, identify strips its sign-in routes (credential accounts,
+ * two-factor, sessions and their widget provenance, unused one-time tokens).
+ * A verified account, or one resolved by its own subject, is adopted as before.
+ */
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mockUserFindFirst = vi.fn()
+const mockPrincipalFindFirst = vi.fn()
+const mockSessionFindFirst = vi.fn()
+const insertValues = vi.fn()
+const updateSet = vi.fn()
+const deletes: unknown[] = []
+const calls: string[] = []
+const mockVerifyJWT = vi.fn()
+
+vi.mock('@tanstack/react-router', () => ({
+  createFileRoute: vi.fn(() => (opts: unknown) => ({ options: opts })),
+}))
+
+vi.mock('@/lib/server/db', async (importOriginal) => ({
+  // Spread the real db module so tables/operators stay current; override only what this suite drives.
+  ...(await importOriginal<typeof import('@/lib/server/db')>()),
+  db: {
+    query: {
+      user: { findFirst: (...args: unknown[]) => mockUserFindFirst(...args) },
+      session: { findFirst: (...args: unknown[]) => mockSessionFindFirst(...args) },
+      principal: { findFirst: (...args: unknown[]) => mockPrincipalFindFirst(...args) },
+      segments: { findFirst: vi.fn() },
+    },
+    insert: () => ({
+      values: (v: unknown) => {
+        insertValues(v)
+        const chain = {
+          returning: async () => [{ id: 'inserted' }],
+          onConflictDoUpdate: async () => undefined,
+          onConflictDoNothing: () => chain,
+        }
+        return chain
+      },
+    }),
+    update: () => ({
+      set: (s: unknown) => {
+        updateSet(s)
+        calls.push('update')
+        return { where: async () => undefined }
+      },
+    }),
+    delete: (table: unknown) => ({
+      where: async () => {
+        deletes.push(table)
+        calls.push('delete')
+      },
+    }),
+    select: () => ({ from: () => ({ where: () => ({}) }) }),
+  },
+  eq: vi.fn(),
+  and: vi.fn(),
+  gt: vi.fn(),
+  isNull: vi.fn(),
+  inArray: vi.fn(),
+  sql: vi.fn((parts: TemplateStringsArray) => parts.raw[0]),
+}))
+
+vi.mock('@/lib/server/domains/settings/settings.widget', () => ({
+  getWidgetConfig: vi.fn(async () => ({ enabled: true, identifyVerification: false })),
+  getWidgetSecret: vi.fn(async () => 'secret'),
+}))
+
+vi.mock('@/lib/server/domains/posts/post.public', () => ({
+  getAllUserVotedPostIds: vi.fn(async () => new Set()),
+}))
+
+vi.mock('@/lib/server/storage/s3', () => ({
+  getPublicUrlOrNull: vi.fn(() => null),
+}))
+
+vi.mock('@/lib/server/auth/identify-merge', () => ({
+  resolveAndMergeAnonymousToken: vi.fn(),
+}))
+
+vi.mock('@/lib/server/widget/identity-token', () => ({
+  verifyHS256JWT: (...args: unknown[]) => mockVerifyJWT(...args),
+}))
+
+vi.mock('@/lib/server/domains/users/user.attributes', () => ({
+  validateAndCoerceAttributes: vi.fn(async () => ({ valid: {}, removals: [], errors: [] })),
+  mergeMetadata: vi.fn(() => null),
+  EXTERNAL_ID_KEY: '_externalUserId',
+}))
+
+vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
+  addMember: vi.fn(async () => undefined),
+  reconcileWidgetMemberships: vi.fn(async () => undefined),
+}))
+
+vi.mock('@quackback/ids', () => ({
+  generateId: vi.fn((kind: string) => `${kind}_generated`),
+}))
+
+import { Route } from '../identify'
+
+type RouteOpts = {
+  server: { handlers: { POST: (args: { request: Request }) => Promise<Response> } }
+}
+const { POST } = (Route as unknown as { options: RouteOpts }).options.server.handlers
+
+function postIdentify(body: Record<string, unknown>): Promise<Response> {
+  return POST({
+    request: new Request('http://test/api/widget/identify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  })
+}
+
+import { account, oneTimeToken, session, twoFactor, widgetIdentifiedSession } from '@/lib/server/db'
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  deletes.length = 0
+  calls.length = 0
+  mockSessionFindFirst.mockResolvedValue(null)
+})
+
+describe('I4: adopting an email match whose email is not verified', () => {
+  const unverified = {
+    id: 'user_pre',
+    email: 'victim@acme.com',
+    emailVerified: false,
+    externalId: null,
+    name: 'Attacker',
+    image: null,
+    metadata: null,
+  }
+
+  it('strips sign-in routes before linking the subject', async () => {
+    mockVerifyJWT.mockReturnValue({ sub: 'sub_victim', email: 'victim@acme.com', name: 'V' })
+    mockUserFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ ...unverified })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_pre', role: 'user' })
+
+    const res = await postIdentify({ ssoToken: 'jwt' })
+
+    expect(res.status).toBe(200)
+    expect(deletes).toEqual(
+      expect.arrayContaining([account, twoFactor, session, widgetIdentifiedSession, oneTimeToken])
+    )
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ externalId: 'sub_victim', emailVerified: true })
+    )
+    // Every strip happens before the account is linked.
+    const firstUpdate = calls.indexOf('update')
+    expect(calls.lastIndexOf('delete')).toBeLessThan(firstUpdate)
+  })
+
+  it('adopts a verified email match without stripping anything', async () => {
+    mockVerifyJWT.mockReturnValue({ sub: 'sub_v', email: 'v@acme.com', name: 'V' })
+    mockUserFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...unverified, email: 'v@acme.com', emailVerified: true })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_v', role: 'user' })
+
+    const res = await postIdentify({ ssoToken: 'jwt' })
+
+    expect(res.status).toBe(200)
+    expect(deletes).toHaveLength(0)
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ externalId: 'sub_v' }))
+  })
+
+  it('does not strip an account resolved by its own subject', async () => {
+    mockVerifyJWT.mockReturnValue({ sub: 'sub_r', email: 'r@acme.com', name: 'R' })
+    mockUserFindFirst.mockResolvedValueOnce({
+      ...unverified,
+      email: 'r@acme.com',
+      externalId: 'sub_r',
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_r', role: 'user' })
+
+    const res = await postIdentify({ ssoToken: 'jwt' })
+
+    expect(res.status).toBe(200)
+    expect(deletes).toHaveLength(0)
+  })
+})

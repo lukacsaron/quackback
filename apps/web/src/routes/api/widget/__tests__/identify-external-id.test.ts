@@ -230,6 +230,9 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
       .mockResolvedValueOnce({
         id: 'user_carol',
         email: 'carol@acme.com',
+        // A real row always carries the flag; verified so this stays the plain
+        // backfill case (unverified adoption is covered in identify-unverified-adoption).
+        emailVerified: true,
         externalId: null,
         name: 'Carol',
         image: null,

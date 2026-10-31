@@ -6,12 +6,16 @@ import {
   db,
   user,
   session,
+  account,
+  twoFactor,
+  oneTimeToken,
   segments,
   principal,
   widgetIdentifiedSession,
   eq,
   and,
   gt,
+  inArray,
   isNull,
   sql,
 } from '@/lib/server/db'
@@ -268,10 +272,34 @@ export const Route = createFileRoute('/api/widget/identify')({
             userRecord = undefined
           }
         }
+        // Set when the account was found by email rather than by its own `sub`:
+        // identify did not create it, so it must not be adopted blindly.
+        let matchedByEmail = false
         if (!userRecord) {
           userRecord = await db.query.user.findFirst({
             where: sql`LOWER(${user.email}) = ${normalizedEmail}`,
           })
+          matchedByEmail = !!userRecord
+        }
+
+        if (
+          userRecord &&
+          matchedByEmail &&
+          userRecord.externalId &&
+          userRecord.externalId !== externalId
+        ) {
+          // The address belongs to an account already bound to ANOTHER subject
+          // (e.g. a recycled email). Never re-point it: that would sign this
+          // visitor in as someone else.
+          log.warn(
+            { external_id: externalId, bound_user_id: userRecord.id },
+            'identify email match is bound to a different subject'
+          )
+          return jsonError(
+            'SUBJECT_CONFLICT',
+            'This email belongs to an account bound to another identity',
+            409
+          )
         }
 
         const country = captureCountryFromHeaders(request.headers)
@@ -338,6 +366,30 @@ export const Route = createFileRoute('/api/widget/identify')({
               // Address came from a signed JWT.
               updates.emailVerified = true
             }
+          }
+
+          if (!isTeammate && matchedByEmail && !userRecord.emailVerified) {
+            // Adopting an account nobody proved owns this address: whoever
+            // registered it keeps no way in. Strip every sign-in route BEFORE
+            // the subject is linked, so a failure here links nothing.
+            const adoptedId = userRecord.id
+            await db
+              .delete(widgetIdentifiedSession)
+              .where(
+                inArray(
+                  widgetIdentifiedSession.sessionId,
+                  db.select({ id: session.id }).from(session).where(eq(session.userId, adoptedId))
+                )
+              )
+            await db.delete(session).where(eq(session.userId, adoptedId))
+            await db.delete(oneTimeToken).where(eq(oneTimeToken.userId, adoptedId))
+            await db.delete(account).where(eq(account.userId, adoptedId))
+            await db.delete(twoFactor).where(eq(twoFactor.userId, adoptedId))
+            updates.twoFactorEnabled = false
+            log.warn(
+              { user_id: adoptedId },
+              'identify adopted an unverified account; sign-in stripped'
+            )
           }
 
           if (Object.keys(updates).length > 0) {
