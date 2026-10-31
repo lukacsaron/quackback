@@ -33,6 +33,8 @@ vi.mock('@tanstack/react-start/server', () => ({
 const hoisted = vi.hoisted(() => ({
   getSession: vi.fn(),
   getPublicAuthConfig: vi.fn(),
+  // Default: no delegated sign-in configured.
+  getPublicPortalConfig: vi.fn(async () => ({})),
   isSignInMethodEnabled: vi.fn(),
   getRegisteredOidcProviderIds: vi.fn(),
   getRegisteredAuthProviders: vi.fn(),
@@ -45,6 +47,7 @@ vi.mock('@/lib/server/auth/session', () => ({
 
 vi.mock('@/lib/server/domains/settings/settings.service', () => ({
   getPublicAuthConfig: hoisted.getPublicAuthConfig,
+  getPublicPortalConfig: hoisted.getPublicPortalConfig,
 }))
 
 vi.mock('@/lib/shared/signin-methods', () => ({
@@ -170,5 +173,59 @@ describe('resolveInstantSsoRedirectFn', () => {
 
     expect(result).toBeNull()
     expect(hoisted.signInSocial).not.toHaveBeenCalled()
+  })
+})
+
+describe('resolveInstantSsoRedirectFn with portalConfig.externalSignInUrl', () => {
+  const EXTERNAL = 'https://app.example.com/api/feedback/sso'
+
+  it('sends an anonymous portal sign-in to the external URL with an encoded relative returnTo', async () => {
+    hoisted.getSession.mockResolvedValueOnce(null)
+    hoisted.getPublicPortalConfig.mockResolvedValueOnce({ externalSignInUrl: EXTERNAL })
+
+    const result = await resolveHandler({ data: { callbackUrl: '/b/ideas?sort=top' } })
+
+    expect(result).toEqual({
+      url: `${EXTERNAL}?returnTo=%2Fb%2Fideas%3Fsort%3Dtop`,
+    })
+    expect(hoisted.signInSocial).not.toHaveBeenCalled()
+  })
+
+  it('never delegates the team login (callbackUrl /admin)', async () => {
+    soleOidcWorkspace({ oauth: { password: true, magicLink: false } })
+    hoisted.getPublicPortalConfig.mockResolvedValueOnce({ externalSignInUrl: EXTERNAL })
+
+    const result = await resolveHandler({ data: { callbackUrl: '/admin' } })
+
+    expect(result).toBeNull()
+  })
+
+  it('replaces an unsafe callbackUrl with /', async () => {
+    hoisted.getSession.mockResolvedValueOnce(null)
+    hoisted.getPublicPortalConfig.mockResolvedValueOnce({ externalSignInUrl: EXTERNAL })
+
+    const result = await resolveHandler({ data: { callbackUrl: '//evil.example' } })
+
+    expect(result).toEqual({ url: `${EXTERNAL}?returnTo=%2F` })
+  })
+
+  it('does not redirect a signed-in visitor', async () => {
+    hoisted.getSession.mockResolvedValueOnce({
+      user: { principalType: 'user', id: 'user_1', email: 'alice@example.com' },
+    })
+    hoisted.getPublicPortalConfig.mockResolvedValue({ externalSignInUrl: EXTERNAL })
+
+    const result = await resolveHandler({ data: { callbackUrl: '/b/ideas' } })
+
+    expect(result).toBeNull()
+    hoisted.getPublicPortalConfig.mockResolvedValue({})
+  })
+
+  it('without the setting, behaviour is unchanged (password on => null)', async () => {
+    soleOidcWorkspace({ oauth: { password: true, magicLink: false } })
+
+    const result = await resolveHandler({ data: { callbackUrl: '/b/ideas' } })
+
+    expect(result).toBeNull()
   })
 })

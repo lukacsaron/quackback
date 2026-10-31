@@ -204,7 +204,7 @@ async function runHandoffLoader(search: string) {
       return { status: 'redirect' as const, to: returnTo }
     }
     const { buildSigninRedirect } = await import('@/lib/shared/auth-prompt')
-    const landing = buildSigninRedirect(returnTo)
+    const landing = buildSigninRedirect(returnTo, { error: 'teammate_widget_handoff' })
     return { status: 'redirect' as const, to: landing.to, search: landing.search }
   }
 
@@ -490,7 +490,13 @@ describe('widget handoff loader — valid OTT', () => {
       expect(result.status).toBe('redirect')
       if (result.status === 'redirect') {
         expect(result.to).toBe('/')
-        expect(result.search).toEqual({ auth: 'signin', callbackUrl: '/posts/abc' })
+        // The error keeps a delegated portal (externalSignInUrl) on the native
+        // dialog, so a teammate is never bounced back to the external app.
+        expect(result.search).toEqual({
+          auth: 'signin',
+          callbackUrl: '/posts/abc',
+          error: 'teammate_widget_handoff',
+        })
       }
     })
 

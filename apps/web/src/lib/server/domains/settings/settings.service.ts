@@ -915,6 +915,9 @@ export async function getPublicPortalConfig(): Promise<PublicPortalConfig> {
         isPrivate: portalConfig.access?.visibility === 'private',
         widgetSignIn: portalConfig.access?.widgetSignIn ?? false,
       },
+      ...(portalConfig.externalSignInUrl && {
+        externalSignInUrl: portalConfig.externalSignInUrl,
+      }),
     }
   } catch (error) {
     logSettingsReadError(log, error, 'get public portal config failed')
@@ -1049,6 +1052,9 @@ async function readWorkspaceSettings(): Promise<WorkspaceSettings | null> {
             isPrivate: portalConfig.access?.visibility === 'private',
             widgetSignIn: portalConfig.access?.widgetSignIn ?? false,
           },
+          ...(portalConfig.externalSignInUrl && {
+            externalSignInUrl: portalConfig.externalSignInUrl,
+          }),
         }
       })(),
       publicWidgetConfig: projectPublicWidgetConfig(widgetConfig, featureFlags, assistantIdentity),

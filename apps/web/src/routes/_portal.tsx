@@ -336,6 +336,10 @@ function PortalLayout() {
     from: '__root__',
     select: ({ session }) => !!session?.user && session.user.principalType !== 'anonymous',
   })
+  const externalSignInUrl = useRouteContext({
+    from: '__root__',
+    select: ({ settings }) => settings?.publicPortalConfig?.externalSignInUrl ?? null,
+  })
 
   // Access denied: render the in-place sign-in wall (a normal 200 page). The
   // gate is self-contained (it mounts its own PortalIntlProvider).
@@ -381,7 +385,7 @@ function PortalLayout() {
   return (
     <PortalIntlProvider locale={locale} messages={messages}>
       <PortalPermissionsProvider permissionKeys={permissionKeys}>
-        <AuthPopoverProvider>
+        <AuthPopoverProvider externalSignInUrl={externalSignInUrl}>
           <PortalAuthAutoOpen
             mode={prompt.mode}
             callbackUrl={prompt.callbackUrl}

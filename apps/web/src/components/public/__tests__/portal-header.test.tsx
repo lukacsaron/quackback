@@ -126,13 +126,15 @@ const loggedInSession = {
 function renderHeader({
   userRole,
   isLoggedIn,
+  settings = {},
 }: {
   userRole?: 'admin' | 'member' | 'user' | null
   isLoggedIn: boolean
+  settings?: Record<string, unknown>
 }) {
   mockGetRouteContext.mockReturnValue({
     session: isLoggedIn ? loggedInSession : null,
-    settings: {},
+    settings,
     registeredAuthProviders: [],
   })
 
@@ -251,6 +253,43 @@ describe('PortalHeader — Sign up button visibility', () => {
     renderHeader({ userRole: null, isLoggedIn: false })
     expect(screen.getByRole('button', { name: /log in/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /sign up/i })).toBeNull()
+  })
+})
+
+describe('PortalHeader — delegated sign-in (externalSignInUrl)', () => {
+  const external = {
+    publicPortalConfig: { externalSignInUrl: 'https://app.example.com/api/feedback/sso' },
+  }
+  beforeEach(() => {
+    mockOpenAuthPopover.mockClear()
+    mockSocial.mockClear()
+    mockResolveSole.mockReturnValue(null)
+    mockHasDistinctSignup.mockReturnValue(true)
+  })
+  afterEach(() => cleanup())
+
+  it('shows Log in even when no Quackback sign-in method is enabled', () => {
+    mockHasAny.mockReturnValue(false)
+    renderHeader({ userRole: null, isLoggedIn: false, settings: external })
+    fireEvent.click(screen.getByRole('button', { name: /log in/i }))
+    // The popover provider performs the external redirect.
+    expect(mockOpenAuthPopover).toHaveBeenCalledWith(expect.objectContaining({ mode: 'login' }))
+    expect(screen.queryByRole('button', { name: /sign up/i })).toBeNull()
+  })
+
+  it('goes through the delegated sign-in instead of a sole OIDC provider', () => {
+    mockHasAny.mockReturnValue(true)
+    mockResolveSole.mockReturnValue('oidc_entra')
+    renderHeader({ userRole: null, isLoggedIn: false, settings: external })
+    fireEvent.click(screen.getByRole('button', { name: /log in/i }))
+    expect(mockSocial).not.toHaveBeenCalled()
+    expect(mockOpenAuthPopover).toHaveBeenCalled()
+  })
+
+  it('without the setting, no method means no Log in button (unchanged)', () => {
+    mockHasAny.mockReturnValue(false)
+    renderHeader({ userRole: null, isLoggedIn: false })
+    expect(screen.queryByRole('button', { name: /log in/i })).toBeNull()
   })
 })
 

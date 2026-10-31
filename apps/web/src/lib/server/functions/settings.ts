@@ -374,6 +374,15 @@ export const updatePortalConfigSchema = z.object({
         .optional(),
     })
     .optional(),
+  // Delegated portal sign-in (see PortalConfig.externalSignInUrl). http(s)
+  // only; null clears it.
+  externalSignInUrl: z
+    .string()
+    .url()
+    .max(2048)
+    .refine((u) => /^https?:\/\//i.test(u), 'URL must be http(s)')
+    .nullable()
+    .optional(),
 })
 
 const saveLogoKeySchema = z.object({

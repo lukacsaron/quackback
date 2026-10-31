@@ -1,6 +1,9 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getSession } from '@/lib/server/auth/session'
-import { getPublicAuthConfig } from '@/lib/server/domains/settings/settings.service'
+import {
+  getPublicAuthConfig,
+  getPublicPortalConfig,
+} from '@/lib/server/domains/settings/settings.service'
 import { isSignInMethodEnabled } from '@/lib/shared/signin-methods'
 import {
   getRegisteredAuthProviders,
@@ -10,6 +13,7 @@ import { auth } from '@/lib/server/auth'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { signinErrorLanding } from '@/lib/shared/auth-prompt'
+import { resolveExternalSignInUrl } from '@/lib/shared/external-signin'
 
 /**
  * Server-side: returns `{ url }` to the IdP when the workspace's ONLY sign-in
@@ -22,6 +26,10 @@ import { signinErrorLanding } from '@/lib/shared/auth-prompt'
  * runtime applies), so it covers a routed-only provider with no public button
  * just as well as a public one — and never fires while password / magic-link /
  * social or a *second* IdP is also usable.
+ *
+ * A configured `portalConfig.externalSignInUrl` wins over all of that for a
+ * portal sign-in: the visitor goes to the workspace's own app, carrying the
+ * portal path as `returnTo`. Team targets (`/admin`) are never delegated.
  */
 export const resolveInstantSsoRedirectFn = createServerFn({ method: 'GET' })
   .validator((d: { callbackUrl?: string }) => d ?? {})
@@ -29,6 +37,10 @@ export const resolveInstantSsoRedirectFn = createServerFn({ method: 'GET' })
     // Loop-safety: signed-in users must never be force-redirected to SSO.
     const session = await getSession()
     if (session?.user && session.user.principalType !== 'anonymous') return null
+
+    const portalConfig = await getPublicPortalConfig()
+    const external = resolveExternalSignInUrl(portalConfig?.externalSignInUrl, data.callbackUrl)
+    if (external) return { url: external }
 
     const [registeredOidc, registeredAll, authConfig] = await Promise.all([
       getRegisteredOidcProviderIds(),

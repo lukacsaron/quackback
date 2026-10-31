@@ -368,6 +368,14 @@ export interface PortalConfig {
   nav?: PortalNavConfig
   /** Support tab (conversations on the portal). Optional — absent = disabled. */
   support?: PortalSupportConfig
+  /**
+   * Delegate portal sign-in to the workspace's own app. When set, the portal's
+   * "Log in" button and every redirect to the portal sign-in dialog go to
+   * `<externalSignInUrl>?returnTo=<portal path>` instead (see
+   * `resolveExternalSignInUrl`). Team sign-in (`/admin`) is never delegated.
+   * Absent / null = Quackback's own dialog.
+   */
+  externalSignInUrl?: string | null
 }
 
 /**
@@ -989,6 +997,8 @@ export interface UpdatePortalConfigInput {
   /** Replaced wholesale (items is an ordered array — never merged). */
   nav?: PortalNavConfig
   support?: Partial<PortalSupportConfig>
+  /** null clears it. See {@link PortalConfig.externalSignInUrl}. */
+  externalSignInUrl?: string | null
 }
 
 // =============================================================================
@@ -1034,6 +1044,8 @@ export interface PublicPortalConfig {
    * CTA. `allowedDomains` remains server-only.
    */
   portalAccess?: { isPrivate: boolean; widgetSignIn: boolean }
+  /** See {@link PortalConfig.externalSignInUrl}. Absent when not configured. */
+  externalSignInUrl?: string
 }
 
 // =============================================================================

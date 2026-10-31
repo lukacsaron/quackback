@@ -139,6 +139,9 @@ export function PortalHeader({
 
   const authPopover = useAuthPopoverSafe()
   const openAuthPopover = authPopover?.openAuthPopover
+  // Delegated portal sign-in: "Log in" goes to the workspace's own app (the
+  // popover provider does the redirect), even when no Quackback method is on.
+  const externalSignIn = !!settings?.publicPortalConfig?.externalSignInUrl
 
   // Listen for auth success to refetch session and role via router invalidation
   useAuthBroadcast({
@@ -277,21 +280,23 @@ export function PortalHeader({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      ) : openAuthPopover && portalAuthEnabled ? (
+      ) : openAuthPopover && (portalAuthEnabled || externalSignIn) ? (
         // Anonymous user with auth popover available. Show "Sign up" only when it
         // leads somewhere different from "Log in" (see hasDistinctSignup);
         // otherwise the sole "Log in" button becomes the primary CTA.
         <div className="flex items-center gap-2">
           <Button
-            variant={showSignup ? 'ghost' : 'default'}
+            variant={showSignup && !externalSignIn ? 'ghost' : 'default'}
             size="sm"
             onClick={() =>
-              soleOidcProviderId ? redirectToSoleProvider() : openAuthPopover({ mode: 'login' })
+              soleOidcProviderId && !externalSignIn
+                ? redirectToSoleProvider()
+                : openAuthPopover({ mode: 'login' })
             }
           >
             <FormattedMessage id="portal.header.auth.logIn" defaultMessage="Log in" />
           </Button>
-          {showSignup && (
+          {showSignup && !externalSignIn && (
             <Button
               size="sm"
               onClick={() =>

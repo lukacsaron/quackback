@@ -58,6 +58,7 @@ export type AuthBlockCode =
   | 'unable_to_create_session'
   | 'oauth_provider_not_found'
   | 'handoff_failed'
+  | 'teammate_widget_handoff'
 
 export const AUTH_BLOCK_MESSAGES: Record<AuthBlockCode, string> = {
   password_method_not_allowed:
@@ -112,4 +113,6 @@ export const AUTH_BLOCK_MESSAGES: Record<AuthBlockCode, string> = {
     "That sign-in provider isn't available right now. It may have been disabled by an administrator.",
   handoff_failed:
     'That workspace handoff expired or was already used. Sign in here, or reopen the workspace from Quackback.',
+  teammate_widget_handoff:
+    'Team accounts cannot sign in to the portal from another app. Sign in here with your team account.',
 }

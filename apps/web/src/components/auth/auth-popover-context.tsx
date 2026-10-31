@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from 'react'
+import { resolveExternalSignInUrl } from '@/lib/shared/external-signin'
 
 type AuthMode = 'login' | 'signup'
 
@@ -17,6 +18,10 @@ interface OpenAuthPopoverOptions {
   onSuccess?: () => void
   callbackUrl?: string
   linkConflict?: LinkConflictContext
+  /** Keep Quackback's own dialog even when sign-in is delegated — set when the
+   *  dialog is opened to show a sign-in error, which a redirect would lose
+   *  (and could loop on). */
+  nativeDialog?: boolean
 }
 
 interface AuthPopoverContextValue {
@@ -35,22 +40,39 @@ const AuthPopoverContext = createContext<AuthPopoverContextValue | null>(null)
 
 interface AuthPopoverProviderProps {
   children: ReactNode
+  /** `portalConfig.externalSignInUrl`: when set, opening the dialog sends the
+   *  visitor to the workspace's own sign-in instead (team targets excepted). */
+  externalSignInUrl?: string | null
 }
 
-export function AuthPopoverProvider({ children }: AuthPopoverProviderProps) {
+export function AuthPopoverProvider({ children, externalSignInUrl }: AuthPopoverProviderProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [mode, setMode] = useState<AuthMode>('login')
   const [callbackUrl, setCallbackUrl] = useState<string | undefined>(undefined)
   const [linkConflict, setLinkConflict] = useState<LinkConflictContext | undefined>(undefined)
   const onSuccessCallbackRef = useRef<(() => void) | null>(null)
 
-  const openAuthPopover = useCallback((options: OpenAuthPopoverOptions) => {
-    setMode(options.mode)
-    onSuccessCallbackRef.current = options.onSuccess || null
-    setCallbackUrl(options.callbackUrl)
-    setLinkConflict(options.linkConflict)
-    setIsOpen(true)
-  }, [])
+  const openAuthPopover = useCallback(
+    (options: OpenAuthPopoverOptions) => {
+      // Delegated portal sign-in. A link-conflict recovery is a Quackback-side
+      // OAuth state and an error landing must show its error, so both keep the
+      // dialog.
+      if (externalSignInUrl && !options.linkConflict && !options.nativeDialog) {
+        const here = `${window.location.pathname}${window.location.search}`
+        const target = resolveExternalSignInUrl(externalSignInUrl, options.callbackUrl ?? here)
+        if (target) {
+          window.location.assign(target)
+          return
+        }
+      }
+      setMode(options.mode)
+      onSuccessCallbackRef.current = options.onSuccess || null
+      setCallbackUrl(options.callbackUrl)
+      setLinkConflict(options.linkConflict)
+      setIsOpen(true)
+    },
+    [externalSignInUrl]
+  )
 
   const reset = useCallback(() => {
     setIsOpen(false)

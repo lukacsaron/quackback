@@ -169,6 +169,20 @@ export function PortalAuthTab({ portalConfig, teamOpenSignup }: PortalAuthTabPro
   })
   const signupBusy = signupMutation.isPending
 
+  // Delegated portal sign-in (portalConfig.externalSignInUrl). Empty = off.
+  const savedExternalSignInUrl = portalConfig.externalSignInUrl ?? ''
+  const [externalSignInUrl, setExternalSignInUrl] = useState<string>(savedExternalSignInUrl)
+  const externalSignInMutation = useMutation({
+    meta: AUTOSAVE,
+    mutationFn: (next: string) =>
+      updatePortalConfigFn({ data: { externalSignInUrl: next.trim() || null } }),
+    onSuccess: () => {
+      startTransition(() => {
+        router.invalidate()
+      })
+    },
+  })
+
   /**
    * Single save path for visibility, domain, and widget sign-in changes.
    *
@@ -369,6 +383,43 @@ export function PortalAuthTab({ portalConfig, teamOpenSignup }: PortalAuthTabPro
             />
           }
         />
+      </SettingsCard>
+
+      <SettingsCard
+        title="External sign-in"
+        description="Send portal visitors to your own app to sign in. Leave empty to use the sign-in options above. Team sign-in is not affected."
+      >
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(e) => {
+            e.preventDefault()
+            externalSignInMutation.mutate(externalSignInUrl)
+          }}
+        >
+          <Input
+            id="portal-external-signin-url"
+            type="url"
+            inputMode="url"
+            placeholder="https://app.example.com/sign-in"
+            value={externalSignInUrl}
+            onChange={(e) => setExternalSignInUrl(e.target.value)}
+            aria-label="External sign-in URL"
+            disabled={externalSignInMutation.isPending}
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={
+              externalSignInMutation.isPending ||
+              externalSignInUrl.trim() === savedExternalSignInUrl
+            }
+          >
+            Save
+          </Button>
+        </form>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Visitors go to this URL with <code>?returnTo=</code> set to the portal page they were on.
+        </p>
       </SettingsCard>
 
       {/* The authorization channels — each a peer card of Portal visibility,

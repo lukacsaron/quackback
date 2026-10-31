@@ -53,6 +53,9 @@ export function useAutoOpenAuthDialog(args: {
     popover.openAuthPopover({
       mode: args.mode ?? 'login',
       callbackUrl: args.callbackUrl ?? attempt?.callbackUrl,
+      // An error landing shows its error in Quackback's dialog, never the
+      // delegated external sign-in (which is what sent the visitor here).
+      nativeDialog: !!args.error,
       linkConflict: isLinkConflict
         ? {
             providerId: attempt?.providerId,

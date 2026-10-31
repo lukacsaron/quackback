@@ -292,7 +292,11 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
       if (existingIsDashboard) {
         return { kind: 'redirect', to: returnTo }
       }
-      const landing = buildSigninRedirect(returnTo)
+      // The error keeps the landing on Quackback's own dialog: with delegated
+      // portal sign-in (portalConfig.externalSignInUrl) a plain landing would
+      // send the teammate back out to the external app, which would hand them
+      // straight back here.
+      const landing = buildSigninRedirect(returnTo, { error: 'teammate_widget_handoff' })
       return { kind: 'redirect', to: landing.to, search: landing.search }
     }
 
