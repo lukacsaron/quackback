@@ -23,6 +23,7 @@ import {
   inArray,
   isNull,
   isNotNull,
+  or,
   sql,
   postSubscriptions,
   notificationPreferences,
@@ -337,9 +338,21 @@ export async function getMemberSubscribedPosts(
     })
     .from(postSubscriptions)
     .innerJoin(posts, and(eq(postSubscriptions.postId, posts.id), isNull(posts.deletedAt)))
-    .innerJoin(boards, eq(posts.boardId, boards.id))
+    .innerJoin(boards, and(eq(posts.boardId, boards.id), isNull(boards.deletedAt)))
     .leftJoin(postStatuses, eq(postStatuses.id, posts.statusId))
-    .where(eq(postSubscriptions.principalId, principalId))
+    .where(
+      and(
+        eq(postSubscriptions.principalId, principalId),
+        // Only what the portal would show this member (canViewPost): published
+        // posts, or their own pending ones; never a merged duplicate, whose
+        // page the portal does not list.
+        or(
+          eq(posts.moderationState, 'published'),
+          and(eq(posts.moderationState, 'pending'), eq(posts.principalId, principalId))
+        ),
+        isNull(posts.canonicalPostId)
+      )
+    )
     .orderBy(desc(postSubscriptions.createdAt))
 
   return rows.map((row) => ({ ...row, reason: row.reason as SubscriptionReason }))
