@@ -40,7 +40,9 @@ export const Route = createFileRoute('/api/v1/users/$principalId')({
           const { getPortalUserDetail } = await import('@/lib/server/domains/users/user.detail')
           const { parseUserAttributes } = await import('@/lib/server/domains/users/user.attributes')
 
-          const user = await getPortalUserDetail(principalId)
+          // Engaged posts the portal would show this member only (TTMT fork:
+          // a hidden post would link to a 404). Admin views do not pass this.
+          const user = await getPortalUserDetail(principalId, { portalVisibleOnly: true })
 
           if (!user) {
             return notFoundResponse('Portal user not found')

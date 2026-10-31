@@ -23,7 +23,6 @@ import {
   inArray,
   isNull,
   isNotNull,
-  or,
   sql,
   postSubscriptions,
   notificationPreferences,
@@ -36,6 +35,7 @@ import {
   desc,
   type Transaction,
 } from '@/lib/server/db'
+import { memberVisiblePostFilter } from '@/lib/server/domains/posts/post.member-visibility'
 import { toUuid, type PrincipalId, type PostId } from '@quackback/ids'
 import { relatedPostIdsSql } from '@/lib/server/domains/posts/post.merge-ids'
 import { randomUUID } from 'crypto'
@@ -337,21 +337,12 @@ export async function getMemberSubscribedPosts(
       notifyStatusChanges: postSubscriptions.notifyStatusChanges,
     })
     .from(postSubscriptions)
-    .innerJoin(posts, and(eq(postSubscriptions.postId, posts.id), isNull(posts.deletedAt)))
-    .innerJoin(boards, and(eq(posts.boardId, boards.id), isNull(boards.deletedAt)))
+    .innerJoin(posts, eq(postSubscriptions.postId, posts.id))
+    .innerJoin(boards, eq(posts.boardId, boards.id))
     .leftJoin(postStatuses, eq(postStatuses.id, posts.statusId))
+    // Only what the portal would show this member (shared with user.detail).
     .where(
-      and(
-        eq(postSubscriptions.principalId, principalId),
-        // Only what the portal would show this member (canViewPost): published
-        // posts, or their own pending ones; never a merged duplicate, whose
-        // page the portal does not list.
-        or(
-          eq(posts.moderationState, 'published'),
-          and(eq(posts.moderationState, 'pending'), eq(posts.principalId, principalId))
-        ),
-        isNull(posts.canonicalPostId)
-      )
+      and(eq(postSubscriptions.principalId, principalId), memberVisiblePostFilter(principalId))
     )
     .orderBy(desc(postSubscriptions.createdAt))
 

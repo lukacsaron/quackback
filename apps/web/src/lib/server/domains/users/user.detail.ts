@@ -37,6 +37,7 @@ import { logger } from '@/lib/server/logger'
 import { resolveUserAvatarUrl } from '@/lib/server/domains/principals/principal-display'
 import { hasSignedInSql } from '@/lib/server/domains/principals/team-promotion'
 import { presetForLegacyRole } from '@/lib/shared/permissions'
+import { memberVisiblePostFilter } from '@/lib/server/domains/posts/post.member-visibility'
 
 const log = logger.child({ component: 'user-detail' })
 import type {
@@ -125,6 +126,12 @@ export async function getPortalUserDetail(
   opts?: {
     /** Also find identified teammates (the admin people page shows a person after they join the team). */
     includeTeammates?: boolean
+    /**
+     * TTMT fork: keep only engaged posts the portal would show this member
+     * (published or their own pending, not merged, board not deleted). Set by
+     * the v1 API; the admin views leave it off and see everything.
+     */
+    portalVisibleOnly?: boolean
   }
 ): Promise<PortalUserDetail | null> {
   try {
@@ -165,6 +172,11 @@ export async function getPortalUserDetail(
 
     const principalData = principalResult[0]
 
+    // Every post query that feeds engagedPosts shares this predicate.
+    const postFilter = opts?.portalVisibleOnly
+      ? memberVisiblePostFilter(principalData.principalId)
+      : isNull(posts.deletedAt)
+
     // Run independent queries in parallel for better performance
     const [authoredPosts, commentedPostIds, votedPostIds] = await Promise.all([
       // Get posts authored by this user (via principalId)
@@ -188,7 +200,7 @@ export async function getPortalUserDetail(
         .from(posts)
         .innerJoin(boards, eq(posts.boardId, boards.id))
         .leftJoin(postStatuses, eq(postStatuses.id, posts.statusId))
-        .where(and(eq(posts.principalId, principalData.principalId), isNull(posts.deletedAt)))
+        .where(and(eq(posts.principalId, principalData.principalId), postFilter))
         .orderBy(desc(posts.createdAt))
         .limit(100),
 
@@ -200,9 +212,8 @@ export async function getPortalUserDetail(
         })
         .from(postComments)
         .innerJoin(posts, eq(posts.id, postComments.postId))
-        .where(
-          and(eq(postComments.principalId, principalData.principalId), isNull(posts.deletedAt))
-        )
+        .innerJoin(boards, eq(posts.boardId, boards.id))
+        .where(and(eq(postComments.principalId, principalData.principalId), postFilter))
         .groupBy(postComments.postId)
         .limit(100),
 
@@ -214,7 +225,8 @@ export async function getPortalUserDetail(
         })
         .from(postVotes)
         .innerJoin(posts, eq(posts.id, postVotes.postId))
-        .where(and(eq(postVotes.principalId, principalData.principalId), isNull(posts.deletedAt)))
+        .innerJoin(boards, eq(posts.boardId, boards.id))
+        .where(and(eq(postVotes.principalId, principalData.principalId), postFilter))
         .orderBy(desc(postVotes.createdAt))
         .limit(100),
     ])
@@ -253,7 +265,7 @@ export async function getPortalUserDetail(
             .from(posts)
             .innerJoin(boards, eq(posts.boardId, boards.id))
             .leftJoin(postStatuses, eq(postStatuses.id, posts.statusId))
-            .where(and(inArray(posts.id, otherPostIds), isNull(posts.deletedAt)))
+            .where(and(inArray(posts.id, otherPostIds), postFilter))
         : [],
 
       // Get comment counts for all engaged posts in one query
