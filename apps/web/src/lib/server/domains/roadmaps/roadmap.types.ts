@@ -71,6 +71,13 @@ export interface RoadmapViewPost {
   statusId: PostStatusId | null
   /** Target ship date (time-based roadmap); serialized across the RPC boundary. */
   eta: Date | string | null
+  /**
+   * TTMT: when the post entered its current status: the latest
+   * `status.changed` post_activity row, else the post's created_at (a post
+   * created directly in its status has no activity row). Serialized across
+   * the RPC boundary.
+   */
+  statusChangedAt: Date | string
   board: {
     id: BoardId
     name: string

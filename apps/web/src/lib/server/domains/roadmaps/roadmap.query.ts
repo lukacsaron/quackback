@@ -14,6 +14,7 @@ import {
   posts,
   postTagAssignments,
   postTags,
+  postActivity,
   boards,
   userSegments,
   type Roadmap,
@@ -139,6 +140,17 @@ function runtimeFilterConditions(options: RoadmapPostsQueryOptions, viewer?: Act
   return conditions
 }
 
+/**
+ * TTMT: when each post entered its current status. A correlated subquery in
+ * the select list, served by post_activity_post_id_created_idx (post_id,
+ * created_at). Postgres (9.6+) postpones an expensive select-list expression
+ * past ORDER BY/LIMIT, so a page costs one index probe per returned post. Falls
+ * back to the post's created_at for a post created directly in its status.
+ */
+const statusChangedAtSql = sql<Date>`coalesce((select max(${postActivity.createdAt}) from ${postActivity} where ${postActivity.postId} = ${posts.id} and ${postActivity.type} = 'status.changed'), ${posts.createdAt})`.mapWith(
+  posts.createdAt
+)
+
 function sortFor(options: RoadmapPostsQueryOptions): SQL {
   if (options.sort === 'newest') return desc(posts.createdAt)
   if (options.sort === 'oldest') return asc(posts.createdAt)
@@ -184,6 +196,7 @@ async function queryRoadmapPosts(
           commentCount: posts.commentCount,
           statusId: posts.statusId,
           eta: posts.eta,
+          statusChangedAt: statusChangedAtSql,
         },
         board: { id: boards.id, name: boards.name, slug: boards.slug },
       })

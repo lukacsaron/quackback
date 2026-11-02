@@ -41,6 +41,7 @@ const PAGE = {
       commentCount: 4,
       statusId: 'post_status_1',
       eta: new Date('2026-12-01T00:00:00.000Z'),
+      statusChangedAt: new Date('2026-10-15T09:30:00.000Z'),
       board: { id: 'board_1', name: 'Ideas', slug: 'ideas' },
     },
   ],
@@ -89,10 +90,11 @@ describe('GET /api/v1/roadmaps/:roadmapId/posts without credentials', () => {
     expect(Object.keys(body.data).sort()).toEqual(['hasMore', 'items', 'total'])
     const item = body.data.items[0]
     expect(Object.keys(item).sort()).toEqual(
-      ['board', 'eta', 'id', 'statusId', 'title', 'voteCount'].sort()
+      ['board', 'eta', 'id', 'statusChangedAt', 'statusId', 'title', 'voteCount'].sort()
     )
     expect(Object.keys(item.board).sort()).toEqual(['id', 'name', 'slug'])
     expect(item.eta).toBe('2026-12-01T00:00:00.000Z')
+    expect(item.statusChangedAt).toBe('2026-10-15T09:30:00.000Z')
   })
 
   it('answers 404 when the roadmap is not viewable anonymously', async () => {
@@ -154,5 +156,95 @@ describe('GET /api/v1/roadmaps/:roadmapId/posts with an Authorization header', (
   it('caps limit at 100 on the keyed path', async () => {
     await get('?limit=500', { authorization: 'Bearer qb_test' })
     expect(mockGetRoadmapPosts.mock.calls[0][1].limit).toBe(100)
+  })
+
+  it('emits the same item shape as the anonymous path, with statusChangedAt', async () => {
+    const res = await get('', { authorization: 'Bearer qb_test' })
+    const item = (await res.json()).data.items[0]
+    expect(Object.keys(item).sort()).toEqual(
+      ['board', 'eta', 'id', 'statusChangedAt', 'statusId', 'title', 'voteCount'].sort()
+    )
+    expect(item.statusChangedAt).toBe('2026-10-15T09:30:00.000Z')
+  })
+
+  it('serializes a string statusChangedAt unchanged', async () => {
+    mockGetRoadmapPosts.mockResolvedValue({
+      ...PAGE,
+      items: [{ ...PAGE.items[0], statusChangedAt: '2026-09-01T00:00:00.000Z' }],
+    })
+    const res = await get('', { authorization: 'Bearer qb_test' })
+    expect((await res.json()).data.items[0].statusChangedAt).toBe('2026-09-01T00:00:00.000Z')
+  })
+})
+
+/**
+ * TTMT: pagination is validated before any roadmap query. parseInt used to
+ * turn `?limit=garbage` into NaN, Drizzle then dropped LIMIT and the whole
+ * roadmap was read into memory.
+ */
+const BAD_PAGINATION = [
+  ['garbage limit', '?limit=garbage'],
+  ['negative limit', '?limit=-2'],
+  ['zero limit', '?limit=0'],
+  ['float limit', '?limit=1.5'],
+  ['trailing junk limit', '?limit=10abc'],
+  ['hex limit', '?limit=0x10'],
+  ['garbage offset', '?offset=abc'],
+  ['negative offset', '?offset=-1'],
+  ['float offset', '?offset=2.5'],
+  ['huge offset', '?offset=10001'],
+] as const
+
+describe.each([
+  ['anonymous', {} as Record<string, string>],
+  ['keyed', { authorization: 'Bearer qb_test' } as Record<string, string>],
+])('GET /api/v1/roadmaps/:roadmapId/posts pagination (%s)', (path, headers) => {
+  const query = path === 'anonymous' ? mockGetPublicRoadmapPosts : mockGetRoadmapPosts
+
+  it.each(BAD_PAGINATION)('answers 400 for a %s and does not query', async (_, qs) => {
+    const res = await get(qs, headers)
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error.code).toBe('VALIDATION_ERROR')
+    expect(mockGetPublicRoadmapPosts).not.toHaveBeenCalled()
+    expect(mockGetRoadmapPosts).not.toHaveBeenCalled()
+  })
+
+  it('defaults to limit 20, offset 0', async () => {
+    await get('', headers)
+    expect(query.mock.calls[0][1]).toMatchObject({ limit: 20, offset: 0 })
+  })
+
+  it('caps limit=500 to 100 at the query call', async () => {
+    await get('?limit=500', headers)
+    expect(query.mock.calls[0][1].limit).toBe(100)
+  })
+
+  it('accepts the bounds limit=1, limit=100, offset=10000', async () => {
+    await get('?limit=1&offset=10000', headers)
+    expect(query.mock.calls[0][1]).toMatchObject({ limit: 1, offset: 10000 })
+    vi.clearAllMocks()
+    await get('?limit=100', headers)
+    expect(query.mock.calls[0][1].limit).toBe(100)
+  })
+})
+
+describe('GET /api/v1/roadmaps/:roadmapId/posts pagination ordering (anonymous)', () => {
+  it('counts a bad request against the rate limit before validating', async () => {
+    const res = await get('?limit=garbage')
+    expect(res.status).toBe(400)
+    expect(mockCheckRateLimit).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers 429 before validating when rate limited', async () => {
+    mockCheckRateLimit.mockResolvedValue({ allowed: false, remaining: 0, retryAfter: 30 })
+    const res = await get('?limit=garbage')
+    expect(res.status).toBe(429)
+  })
+
+  it('rejects bad pagination before the portal gate is read', async () => {
+    const res = await get('?offset=-5')
+    expect(res.status).toBe(400)
+    expect(mockResolvePortalAccess).not.toHaveBeenCalled()
   })
 })

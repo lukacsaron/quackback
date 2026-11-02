@@ -19,6 +19,7 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
 import { createDbTestFixture, testDb } from '@/lib/server/__tests__/db-test-fixture'
 import {
   boards,
+  postActivity,
   postStatuses,
   postTagAssignments,
   postTags,
@@ -388,6 +389,46 @@ describe.skipIf(!fixture.available)('roadmap derived membership (real DB)', () =
       seeded.tagA,
       internalTag.id,
     ])
+  })
+
+  it('reports statusChangedAt from the latest status.changed activity, else created_at', async () => {
+    const seeded = await seedBase()
+    const roadmapId = await seedRoadmap(seeded, {})
+    const created = new Date('2026-01-10T08:00:00.000Z')
+    const moved = await seedPost(seeded, { createdAt: created, voteCount: 2 })
+    const direct = await seedPost(seeded, { createdAt: created, voteCount: 1 })
+    await testDb.insert(postActivity).values([
+      {
+        postId: moved,
+        type: 'status.changed',
+        createdAt: new Date('2026-03-01T12:00:00.000Z'),
+      },
+      {
+        postId: moved,
+        type: 'status.changed',
+        createdAt: new Date('2026-04-02T12:00:00.000Z'),
+      },
+      // A later activity of another type must not count.
+      { postId: moved, type: 'tags.added', createdAt: new Date('2026-05-01T00:00:00.000Z') },
+      // Neither must a non-status activity on the post that has none.
+      { postId: direct, type: 'tags.added', createdAt: new Date('2026-05-01T00:00:00.000Z') },
+    ])
+
+    for (const result of [
+      await getRoadmapPosts(roadmapId, { statusId: seeded.statusA }),
+      await getPublicRoadmapPosts(roadmapId, { statusId: seeded.statusA }, ANONYMOUS_ACTOR),
+    ]) {
+      const byId = new Map(result.items.map((post) => [post.id, post]))
+      expect(byId.get(moved)!.statusChangedAt).toBeInstanceOf(Date)
+      expect(new Date(byId.get(moved)!.statusChangedAt).toISOString()).toBe(
+        '2026-04-02T12:00:00.000Z'
+      )
+      expect(new Date(byId.get(direct)!.statusChangedAt).toISOString()).toBe(
+        created.toISOString()
+      )
+      // Sort order is unchanged (votes desc).
+      expect(result.items.map((post) => post.id)).toEqual([moved, direct])
+    }
   })
 
   it('enforces public, team, and matching-segment roadmap visibility', async () => {
