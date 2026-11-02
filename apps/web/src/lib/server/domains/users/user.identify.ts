@@ -30,6 +30,27 @@ import {
 } from './user.attributes'
 
 /**
+ * SQL for "existing metadata, minus these keys, plus these values".
+ *
+ * TTMT fix (fork): drizzle renders a JS array interpolated into sql`` as a
+ * parenthesised list, so the upstream `- ${removals}::text[]` produced
+ * `- ()::text[]` (a syntax error) for an empty list and a row cast for a
+ * non-empty one. Every metadata write to an existing user failed. Build an
+ * explicit ARRAY[...] and skip the subtraction when there is nothing to remove.
+ */
+function mergeMetadataSql(removals: string[], updates: Record<string, unknown>) {
+  const base = sql`coalesce(nullif(${user.metadata}, ''), '{}')::jsonb`
+  const kept =
+    removals.length > 0
+      ? sql`(${base} - ARRAY[${sql.join(
+          removals.map((key) => sql`${key}`),
+          sql`, `
+        )}]::text[])`
+      : base
+  return sql`(${kept} || ${JSON.stringify(updates)}::jsonb)::text`
+}
+
+/**
  * Identify (create or update) a portal user by email.
  *
  * - If the user exists: update name, image, emailVerified, and merge attributes.
@@ -78,7 +99,7 @@ export async function identifyPortalUser(
       }
     }
     if (Object.keys(metadataUpdates).length > 0 || metadataRemovals.length > 0) {
-      userUpdates.metadata = sql`((coalesce(nullif(${user.metadata}, ''), '{}')::jsonb - ${metadataRemovals}::text[]) || ${JSON.stringify(metadataUpdates)}::jsonb)::text`
+      userUpdates.metadata = mergeMetadataSql(metadataRemovals, metadataUpdates)
     }
 
     if (Object.keys(userUpdates).length > 0) {
@@ -254,7 +275,7 @@ export async function updatePortalUser(
     }
   }
   if (Object.keys(metadataUpdates).length > 0 || metadataRemovals.length > 0) {
-    userUpdates.metadata = sql`((coalesce(nullif(${user.metadata}, ''), '{}')::jsonb - ${metadataRemovals}::text[]) || ${JSON.stringify(metadataUpdates)}::jsonb)::text`
+    userUpdates.metadata = mergeMetadataSql(metadataRemovals, metadataUpdates)
   }
 
   if (Object.keys(userUpdates).length > 0) {
