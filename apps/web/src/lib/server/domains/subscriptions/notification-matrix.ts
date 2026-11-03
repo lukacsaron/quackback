@@ -55,3 +55,23 @@ export function shouldNotify(
   // 4. Default true.
   return true
 }
+
+/**
+ * TTMT: preferences for a principal with no stored row.
+ *
+ * Portal users get NO "new comment" email by default: one comment on a card
+ * emailed every voter (19 emails for one "Yesssss" on 2026-11-03). They can
+ * switch it on in Settings -> Preferences. Status-change emails stay on.
+ * The team (admin/member) keeps comment emails on so staff see customer
+ * comments.
+ */
+export function defaultNotificationPreferences(
+  role: string | null | undefined
+): NotificationPreferencesData {
+  const isTeam = role === 'admin' || role === 'member'
+  return {
+    emailStatusChange: true,
+    emailNewComment: isTeam,
+    emailMuted: false,
+  }
+}

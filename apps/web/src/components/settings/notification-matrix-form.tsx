@@ -19,6 +19,7 @@ import {
   type NotificationPreferences,
 } from '@/lib/server/functions/user'
 import type { NotificationMatrix } from '@/lib/server/domains/subscriptions/notification-matrix'
+import { emailSwitchState } from '@/lib/shared/notifications/email-switch'
 
 const GROUP_LABELS: Record<NotificationGroup, string> = {
   feedback: 'Feedback',
@@ -205,6 +206,7 @@ export function NotificationMatrixForm({
                     key={meta.type}
                     meta={meta}
                     matrix={preferences.matrix}
+                    emailChecked={emailSwitchState(preferences, meta.type)}
                     busy={busy}
                     onToggle={setCell}
                   />
@@ -251,16 +253,18 @@ function MatrixHeaderRow() {
 function MatrixRow({
   meta,
   matrix,
+  emailChecked,
   busy,
   onToggle,
 }: {
   meta: NotificationTypeMeta
   matrix: NotificationMatrix | undefined
+  /** TTMT: resolved with the legacy boolean, see emailSwitchState. */
+  emailChecked: boolean
   busy: boolean
   onToggle: (type: string, channel: NotificationChannel, checked: boolean) => void
 }) {
   const inAppChecked = matrix?.[meta.type]?.inApp ?? true
-  const emailChecked = matrix?.[meta.type]?.email ?? true
 
   return (
     <div className={`grid ${MATRIX_GRID_COLS} items-center gap-3 py-3`}>

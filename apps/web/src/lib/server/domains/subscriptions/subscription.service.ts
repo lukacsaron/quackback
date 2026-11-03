@@ -38,6 +38,7 @@ import {
 import { memberVisiblePostFilter } from '@/lib/server/domains/posts/post.member-visibility'
 import { toUuid, type PrincipalId, type PostId } from '@quackback/ids'
 import { relatedPostIdsSql } from '@/lib/server/domains/posts/post.merge-ids'
+import { defaultNotificationPreferences } from './notification-matrix'
 import { randomUUID } from 'crypto'
 import { logger } from '@/lib/server/logger'
 
@@ -368,18 +369,19 @@ export async function getNotificationPreferences(
     }
   }
 
-  // Return defaults (don't create yet - will create on first update)
-  return {
-    emailStatusChange: true,
-    emailNewComment: true,
-    emailMuted: false,
-  }
+  // Return defaults (don't create yet - will create on first update).
+  // TTMT: the default depends on the role (portal users: no comment email).
+  return defaultNotificationPreferences(await principalRole(principalId))
 }
 
-const DEFAULT_NOTIFICATION_PREFS: NotificationPreferencesData = {
-  emailStatusChange: true,
-  emailNewComment: true,
-  emailMuted: false,
+/** TTMT: the principal's role, for role-aware preference defaults. */
+async function principalRole(principalId: PrincipalId): Promise<string | null> {
+  const [row] = await db
+    .select({ role: principal.role })
+    .from(principal)
+    .where(eq(principal.id, principalId))
+    .limit(1)
+  return row?.role ?? null
 }
 
 /**
@@ -416,9 +418,16 @@ export async function batchGetNotificationPreferences(
     ])
   )
 
-  for (const id of principalIds) {
-    if (!map.has(id)) {
-      map.set(id, DEFAULT_NOTIFICATION_PREFS)
+  // TTMT: role-aware defaults for principals without a stored row.
+  const missing = principalIds.filter((id) => !map.has(id))
+  if (missing.length > 0) {
+    const roles = await db
+      .select({ id: principal.id, role: principal.role })
+      .from(principal)
+      .where(inArray(principal.id, missing))
+    const roleById = new Map(roles.map((r) => [r.id, r.role]))
+    for (const id of missing) {
+      map.set(id, defaultNotificationPreferences(roleById.get(id)))
     }
   }
 
@@ -454,13 +463,16 @@ export async function updateNotificationPreferences(
       matrix: updated.matrix ?? undefined,
     }
   } else {
+    // TTMT: fields the caller did not send keep the role's default, so
+    // saving one switch never turns comment emails back on.
+    const defaults = defaultNotificationPreferences(await principalRole(principalId))
     const [created] = await db
       .insert(notificationPreferences)
       .values({
         principalId,
-        emailStatusChange: preferences.emailStatusChange ?? true,
-        emailNewComment: preferences.emailNewComment ?? true,
-        emailMuted: preferences.emailMuted ?? false,
+        emailStatusChange: preferences.emailStatusChange ?? defaults.emailStatusChange,
+        emailNewComment: preferences.emailNewComment ?? defaults.emailNewComment,
+        emailMuted: preferences.emailMuted ?? defaults.emailMuted,
         matrix: preferences.matrix,
       })
       .returning()
